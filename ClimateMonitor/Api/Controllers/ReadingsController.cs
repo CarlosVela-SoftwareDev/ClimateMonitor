@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ClimateMonitor.Services;
 using ClimateMonitor.Services.Models;
+using System.Text.RegularExpressions;
 
 namespace ClimateMonitor.Api.Controllers;
 
@@ -34,9 +35,22 @@ public class ReadingsController : ControllerBase
     /// <param name="deviceReadingRequest">Sensor information and extra metadata from device.</param>
     [HttpPost("evaluate")]
     public ActionResult<IEnumerable<Alert>> EvaluateReading(
-        string deviceSecret,
+        [FromHeader(Name = "x-device-shared-secret")]string deviceSecret,
         [FromBody] DeviceReadingRequest deviceReadingRequest)
     {
+        if (!ValidateFirmwareVersion(deviceReadingRequest.FirmwareVersion))
+        {
+            var problemDetails = new ValidationProblemDetails
+            {
+                Title = "One or more validation errors occurred.",
+                Status = StatusCodes.Status400BadRequest,
+                Detail = "The firmware value does not match semantic versioning format.",
+                Instance = HttpContext.Request.Path
+            };
+            problemDetails.Errors.Add(nameof(deviceReadingRequest.FirmwareVersion), new string[] { "The firmware value does not match semantic versioning format." });
+            return BadRequest(problemDetails);
+        }
+
         if (!_secretValidator.ValidateDeviceSecret(deviceSecret))
         {
             return Problem(
@@ -45,5 +59,11 @@ public class ReadingsController : ControllerBase
         }
 
         return Ok(_alertService.GetAlerts(deviceReadingRequest));
+    }
+
+    private bool ValidateFirmwareVersion(string version)
+    {
+        string pattern = @"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
+        return Regex.IsMatch(version, pattern);
     }
 }
